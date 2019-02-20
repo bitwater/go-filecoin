@@ -6,6 +6,7 @@ package mining
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"gx/ipfs/QmNf3wujpV2Y7Lnj2hy2UrmuX8bhMDStRHbnSLh7Ypf36h/go-hamt-ipld"
@@ -20,6 +21,7 @@ import (
 	"github.com/filecoin-project/go-filecoin/state"
 	"github.com/filecoin-project/go-filecoin/types"
 	"github.com/filecoin-project/go-filecoin/vm"
+	"github.com/minio/blake2b-simd"
 )
 
 var log = logging.Logger("mining")
@@ -102,7 +104,7 @@ func NewDefaultWorker(messageSource MessageSource,
 	powerTable consensus.PowerTableView,
 	bs blockstore.Blockstore,
 	cst *hamt.CborIpldStore,
-	miner address.Address,
+	miner address.Address, // rename minerActor
 	blockSignerAddr address.Address,
 	blockSigner types.Signer,
 	bt time.Duration) *DefaultWorker {
@@ -137,7 +139,7 @@ func NewDefaultWorkerWithDeps(messageSource MessageSource,
 	powerTable consensus.PowerTableView,
 	bs blockstore.Blockstore,
 	cst *hamt.CborIpldStore,
-	miner address.Address,
+	miner address.Address, // rename minerActorAddr
 	blockSignerAddr address.Address,
 	blockSigner types.Signer,
 	bt time.Duration,
@@ -208,7 +210,7 @@ func (w *DefaultWorker) Mine(ctx context.Context, base types.TipSet, nullBlkCoun
 			return false
 		}
 		copy(proof[:], prChRead[:])
-		ticket = consensus.CreateTicket(proof, w.minerAddr)
+		ticket = CreateTicket(proof, w.minerAddr, w.blockSigner)
 	}
 
 	// TODO: Test the interplay of isWinningTicket() and createPoSTFunc()
@@ -245,6 +247,22 @@ func createProof(challengeSeed proofs.PoStChallengeSeed, createPoST DoSomeWorkFu
 		c <- challengeSeed
 	}()
 	return c
+}
+
+// CreateTicket computes a valid ticket using the supplied proof
+// []byte and the minerAddress address.Address.
+//    returns:  []byte -- the ticket.
+func CreateTicket(proof proofs.PoStProof, signerAddr address.Address, signer types.Signer) []byte {
+	buf := append(proof[:], signerAddr.Bytes()...)
+	h := blake2b.Sum256(buf)
+	//return h[:]
+
+	ticket, err := signer.SignBytes(h[:], signerAddr)
+	if err != nil {
+		errMsg := fmt.Sprintf("SignBytes error in CreateTicket: %s", err.Error())
+		panic(errMsg)
+	}
+	return ticket
 }
 
 // fakeCreatePoST is the default implementation of DoSomeWorkFunc.
